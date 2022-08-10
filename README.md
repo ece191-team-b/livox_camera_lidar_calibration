@@ -17,10 +17,12 @@ Use the following link to download an example of data, which is used to calibrat
 Install the ROS environment，install [Livox SDK](https://github.com/Livox-SDK/Livox-SDK) and [livox_ros_driver](https://github.com/Livox-SDK/Livox-SDK-ROS). You can skip this step if they are already installed.
 
 ```
+# install CMake
+sudo apt install cmake
+
 # install Livox_SDK
 git clone https://github.com/Livox-SDK/Livox-SDK.git
 cd Livox-SDK
-sudo ./third_party/apr/apr_build.sh
 cd build && cmake ..
 make
 sudo make install
