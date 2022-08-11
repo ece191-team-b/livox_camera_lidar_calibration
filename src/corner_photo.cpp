@@ -25,7 +25,6 @@ cv::RNG  random_number_generator;
 string photo_dir, output_name, intrinsic_path;
 vector<cv::Point2f> corners;
 
-
 void writeData(const string filename, const string photoname, const float x, const float y, uint mode) {
     ofstream outfile(filename.c_str(), ios_base::app);
     if (!outfile) {
@@ -84,11 +83,14 @@ int main(int argc, char **argv) {
     ros::init(argc, argv, "cornerPhoto");
     getParameters();
 
+    // find all the files in the directory and save in set to make it sorted
     set<fs::path> sorted_by_name;
     for (auto &entry : fs::directory_iterator(photo_dir)) {
         sorted_by_name.insert(entry.path());
     }
 
+    // iterate over the files sorted by name
+    int i = 0;
     for (auto &filename : sorted_by_name) {
         
         cout << "Read file " << filename.c_str() << endl;
@@ -126,12 +128,14 @@ int main(int argc, char **argv) {
         cv::remap(src_img, src_img, map1, map2, cv::INTER_LINEAR);  // correct the distortion
 
         cout << "=================================================================================" << endl;
-        cout << "Left click on the four corners. Starting top left corner and go counterclockwise." << endl;
+        cout << "Left click on the four corners. Starting top / top left corner and go counterclockwise until all 4 corners are marked." << endl;
         cout << "When finish picking, press ENTER to see results." << endl;
         // cv::namedWindow("source", CV_WINDOW_KEEPRATIO);
         cv::namedWindow(photo_dir);
         cv::setMouseCallback(photo_dir, CallBackFunc, NULL);
         cv::imshow(photo_dir, src_img);
+
+        // wait for ESC
         while (true) {
             char k = cv::waitKey(0);
             if (k == 13) {
@@ -156,10 +160,11 @@ int main(int argc, char **argv) {
 
         // draw circles on the image
         cv::Mat result_img = src_img.clone();
+        string photo_name = "photo" + int2str(i); // generate name of the image for corner_photo.txt
         for(uint t = 0; t < corners.size(); ++t) {
             cv::circle(result_img, corners[t], 3, cv::Scalar(random_number_generator.uniform(0, 255), random_number_generator.uniform(0, 255), random_number_generator.uniform(0, 255)), 1, 8, 0);
             printf("Picked point %d: (%.3f %.3f)\n", t+1, corners[t].x, corners[t].y);
-            writeData(output_name, filename, corners[t].x, corners[t].y, t);
+            writeData(output_name, photo_name, corners[t].x, corners[t].y, t);
         }
         
         cout << endl << "Result saved, press ESC to close window." << endl;
@@ -167,6 +172,7 @@ int main(int argc, char **argv) {
         cv::imshow("output", result_img);
         cv::waitKey(0);
         corners.clear();
+        i++; // increment image counter
     }
 }
 
