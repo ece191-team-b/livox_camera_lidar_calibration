@@ -1,5 +1,3 @@
-[中文文档](doc_resources/README_cn.md)
-
 ## Camera-LiDAR-Calibration Manual
 
 This solution provides a method for manually calibrating the extrinsic parameters between Livox LiDAR  and camera, which has been verified on series Mid-40, Horizon and Tele-15. It includes the calibration of camera intrinsic parameters, obtaining of calibration data, the calculation of extrinsic parameters between camera and LiDAR,  and some examples of camera LiDAR fusion application. In this solution, the board corners are used as calibration targets. Thanks to the non-repetitive scanning characteristics of Livox LiDAR, we can find the accurate position of corner in high density point cloud more easily. At the same time, we can get a better calibration result and a better LiDAR camera fusion.
@@ -74,6 +72,10 @@ This project includes the following nodes:
 - colorLidar - give color to the LiDAR point cloud
 
 You can find the corresponding launch file in src/calibration/launch folder if you want to modify any launch file.
+
+There is also an additional bash script that streamlines the process of picking corner points in the point cloud. It iterates through all the `.pcl` files and launches them automatically with the correct arguments and file path.
+
+Additionally, the script also handles parsing the output of `pcl_viewer -use_point_picking` and saves the data automatically to `ws_livox/data/corner_lidar.txt`. 
 
 ### Step2: Calibration of camera intrinsic parameters
 
@@ -198,7 +200,7 @@ roslaunch camera_lidar_calibration cornerPhoto.launch
 
 1. Check the rosbag path in pcdTransfer.launch, set the number of rosbag, and name the rosbag  0.bag, 1.bag...etc.
 
-2. Run the command to convert the rosbag to PCD files in batches, they will be saved in defaut path data/pcdFiles.
+2. Run the following command to convert the rosbag to PCD files in batches, they will be saved in defaut path data/pcdFiles.
 
 ```
 roslaunch camera_lidar_calibration pcdTransfer.launch
@@ -206,7 +208,21 @@ roslaunch camera_lidar_calibration pcdTransfer.launch
 
 3. Use the PCL visualization program to open the PCD files, hold shift + left click to get the selected point coordinates [[Note 6]](#notes), please keep the same order of corner as the photos.
 
+A helper bash script has been written to streamline the process of picking corner points. 
+
+To use it, navigate to the file directory:
+
+```bash
+cd ~/Livox-SDK/ws_livox/src/livox_camera_lidar_calibration
+sudo chmod a+x pick_pcd_corners.bash
+./pick_pcd_corners.bash
 ```
+
+and follow the instructions given in the command line interface.
+
+Alternatively, you can also launch the pcl_viewer and parse the output manually using
+
+```bash
 pcl_viewer -use_point_picking xx.pcd
 ```
 
