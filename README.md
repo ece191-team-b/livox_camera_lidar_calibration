@@ -49,7 +49,7 @@ You can skip this step if they are already installed.
 ```
 # install camera/lidar calibration package
 cd src
-git clone https://github.com/Livox-SDK/livox_camera_lidar_calibration.git
+git clone https://github.com/ece191-team-b/livox_camera_lidar_calibration
 cd ..
 catkin_make
 source devel/setup.bash
