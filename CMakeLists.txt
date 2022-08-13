@@ -16,6 +16,7 @@ find_package(catkin REQUIRED COMPONENTS
   pcl_conversions
   pcl_ros
   cv_bridge
+  image_transport
 )
 
 find_package(PCL REQUIRED)
