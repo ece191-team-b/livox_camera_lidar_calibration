@@ -30,6 +30,7 @@
   <exec_depend>message_runtime</exec_depend>
   <exec_depend>libpcl-all</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
+  <!-- added to support publishing projected result images -->
   <exec_depend>image_transport</exec_depend>
 
     
