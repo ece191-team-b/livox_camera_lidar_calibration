@@ -19,11 +19,10 @@
 
 #include <numeric>
 #include <std_msgs/Float32.h>
+#include <sensor_msgs/Image.h>
 
 using namespace std;
 using namespace cv;
-
-
 
 void getColor(int &result_r, int &result_g, int &result_b, float cur_depth);
 void loadPointcloudFromROSBag(const string& bag_path);
@@ -32,9 +31,13 @@ float max_depth = 60;
 float min_depth = 3;
 
 cv::Mat src_img;
+cv::Mat rectified_img;
+cv_bridge::CvImagePtr cv_ptr(new cv_bridge::CvImage);
+cv_bridge::CvImagePtr old_cv_ptr;
+
 
 vector<livox_ros_driver::CustomMsg> lidar_datas; 
-int threshold_lidar;  // number of cloud point on the photo
+int threshold_lidar, refresh_rate;  // number of cloud point on the photo
 string input_bag_path, input_photo_path, output_path, intrinsic_path, extrinsic_path;
 
 void loadPointcloudFromROSBag(const string& bag_path) {
@@ -129,36 +132,51 @@ void getParameters() {
         cout << "Can not get the value of extrinsic_path" << endl;
         exit(1);
     }
+    if (!ros::param::get("refresh_rate", refresh_rate)) {
+        cout << "Can not get the value of refresh_rate" << endl;
+        exit(1);
+    }
 }
 
-// calculate average the c++17 way
+// read image from msg and save to cv_ptr
+void imageCallback(const sensor_msgs::ImageConstPtr& msg) {
+    try {
+        // ROS_INFO("Recieved image.");
+        cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
+    }
+    catch (cv_bridge::Exception& e) {
+        ROS_ERROR("Could not convert from '%s' to 'bgr8'.", msg->encoding.c_str());
+    }
+}
 
+// read pointcloud from msg and save to 
+void cloudCallback(const livox_ros_driver::CustomMsg& msg) {
+    // ROS_INFO("Pointcloud recieved.");
+    lidar_datas.push_back(msg);
+    // set decay rate
+    if (lidar_datas.size() > threshold_lidar/24000 + 1) {
+        // lidar_datas.clear();
+        lidar_datas.erase(lidar_datas.begin());  // pop front
+    }
+}
 
+/* =========================== MAIN =========================== */
 int main(int argc, char **argv) {
     ros::init(argc, argv, "projectCloud");
 
-    // custom ROS message publishing stuff
+    getParameters();
+    
+    // setup ROS publisher and subscriber
     ros::NodeHandle n;
     ros::Publisher chatter_pub = n.advertise<std_msgs::Float32>("distance", 1000);
+    ros::Subscriber cloud_sub = n.subscribe("/livox/lidar", 1, cloudCallback);
     image_transport::ImageTransport it(n);
     image_transport::Publisher image_pub = it.advertise("projection_result", 1);
+    image_transport::Subscriber sub = it.subscribe("camera/image_0", 1, imageCallback); // subscribe to camera node
+    ros::Rate loop_rate(refresh_rate); // loop at 10 Hz
 
-    cv_bridge::CvImagePtr cv_ptr(new cv_bridge::CvImage);
-    cv_ptr->encoding = "bgr8";
-    cv_ptr->header.frame_id = "projection_result";
-
-
-    ros::Rate loop_rate(1); // loop at 1 Hz
-    getParameters();
-
-    // TODO change to image stream from camera
-    src_img = cv::imread(input_photo_path); // reread the image every loop
-    if(src_img.empty()) {  // use the file name to search the photo
-        cout << "No Picture found by filename: " << input_photo_path << endl;
-        return 1;
-    }
-
-    loadPointcloudFromROSBag(input_bag_path);
+    // if you want to load rosbags
+    // loadPointcloudFromROSBag(input_bag_path);
 
     vector<float> intrinsic;
     getIntrinsic(intrinsic_path, intrinsic);
@@ -182,88 +200,97 @@ int main(int argc, char **argv) {
     distCoeffs.at<double>(3, 0) = distortion[3];
     distCoeffs.at<double>(4, 0) = distortion[4];
 
-    cv::Mat view, rview, map1, map2;
-    cv::Size imageSize = src_img.size();
-    // create custom rectangle as a place holder for the bounding box
-    int rect_x = 750;
-    int rect_y = 150;
-    int rect_width = 50;
-    int rect_height = 50;
-    cv::Rect rect(rect_x, rect_y, rect_width, rect_height);
+    ROS_INFO("Start loop");
 
+    // variable initialization
+    cv::Mat view, rview, map1, map2;
     vector<float> distances; // stores distances of the lidar point cloud within the bounding box
 
+    // parameters of the mockup bounding box 
+    int rect_x = 1488/2;
+    int rect_y = 568/2;
+    int rect_width = 50;
+    int rect_height = 50;
+    
+    // manually set image size for now
+    cv::Size imageSize;
+    imageSize.width = 1448;
+    imageSize.height = 568;
     cv::initUndistortRectifyMap(cameraMatrix, distCoeffs, cv::Mat(),cv::getOptimalNewCameraMatrix(cameraMatrix, distCoeffs, imageSize, 1, imageSize, 0), imageSize, CV_16SC2, map1, map2);
-
-
-    ROS_INFO("Start to project the lidar cloud");
+    
     while (ros::ok()) {
-        float x, y, z;
-        float theoryUV[2] = {0, 0};
-        int myCount = 0;
-
-        src_img = cv::imread(input_photo_path); // reread the image every loop
-        cv::remap(src_img, src_img, map1, map2, cv::INTER_LINEAR);  // correct the distortion
-        cv::rectangle(src_img, rect, cv::Scalar(0, 0, 255)); // add the rectangle to the image
-        cv_ptr->image = src_img;
-        ROS_INFO("Publishing projected image to ROS.");
-
-        for (unsigned int i = 0; i < lidar_datas.size(); ++i) {
-            for (unsigned int j = 0; j < lidar_datas[i].point_num; ++j) {
-                x = lidar_datas[i].points[j].x;
-                y = lidar_datas[i].points[j].y;
-                z = lidar_datas[i].points[j].z;
-
-                getTheoreticalUV(theoryUV, intrinsic, extrinsic, x, y, z);
-                int u = floor(theoryUV[0] + 0.5);
-                int v = floor(theoryUV[1] + 0.5);
-                int r, g, b;
-                getColor(r, g, b, x);
-
-                // points within the bound box gets processed
-                if (u <= rect_x && rect_y <= v) {
-                    // cout << u << ", " << v << " has distance " << x << endl;
-                    distances.push_back(x);
-                }
-                Point p(u, v);
-                circle(src_img, p, 1, Scalar(b, g, r), -1);
-                if (myCount > threshold_lidar) {
-                    break;
-                }
-            }
-            if (myCount > threshold_lidar) {
-                break;
-            }
+        if (cv_ptr->image.empty() || lidar_datas.empty()) {
+            ROS_INFO("Image ptr or lidar data is empty");
         }
-        
-        // publish projected image
-        image_pub.publish(cv_ptr->toImageMsg());
-        
-        // display average distance within the bounding box
-        float avg = std::accumulate(distances.begin(), distances.end(), 0.0) / distances.size();
-        cout << avg << endl;
+        else {
+            src_img = cv_ptr->image;
+            if (old_cv_ptr != cv_ptr) {
+                
 
-        // create the ROS msg and publish it
-        std_msgs::Float32 msg;
-        msg.data = avg;
-        ROS_INFO("Publishing to topic /distance: %f", avg);
-        chatter_pub.publish(msg);
+                // read the actual image size
+                // cv::Size imageSize = src_img.size();
+                // cout << imageSize << endl;
+
+                // int myCount = 0;
+
+                // src_img = cv::imread(input_photo_path); // reread the image every loop
+                cv::remap(src_img, src_img, map1, map2, cv::INTER_LINEAR);  // correct the distortion            
+                
+                // project the point cloud on to the image
+                float x, y, z;
+                float theoryUV[2] = {0, 0};
+                for (unsigned int i = 0; i < lidar_datas.size(); ++i) {
+                    for (unsigned int j = 0; j < lidar_datas[i].point_num; ++j) {
+                        x = lidar_datas[i].points[j].x;
+                        y = lidar_datas[i].points[j].y;
+                        z = lidar_datas[i].points[j].z;
+
+                        getTheoreticalUV(theoryUV, intrinsic, extrinsic, x, y, z);
+                        int u = floor(theoryUV[0] + 0.5);
+                        int v = floor(theoryUV[1] + 0.5);
+                        int r, g, b;
+                        getColor(r, g, b, x);
+
+                        // save distance data within the bounding box
+                        if (rect_x + rect_width >= u && u >= rect_x && rect_y + rect_width >= v && v >= rect_y) {
+                            distances.push_back(x); // TODO: is x the distance to the object? 
+                        }
+                        Point p(u, v);
+                        circle(src_img, p, 1, Scalar(b, g, r), -1);
+                        // if (myCount > threshold_lidar) {
+                        //     break;
+                        // }
+                    }
+                    // if (myCount > threshold_lidar) {
+                    //     break;
+                    // }
+                }
+                
+                // draw bounding box
+                cv::Rect rect(rect_x, rect_y, rect_width, rect_height);
+                cv::rectangle(src_img, rect, cv::Scalar(0, 0, 255)); 
+
+                // publish projected image
+                cv_ptr->image = src_img;
+                image_pub.publish(cv_ptr->toImageMsg());
+                
+                // display average distance within the bounding box
+                float avg = std::accumulate(distances.begin(), distances.end(), 0.0) / distances.size();
+
+                // create the ROS msg and publish it
+                std_msgs::Float32 msg;
+                msg.data = avg;
+                ROS_INFO("Publishing to topic /distance: %f", avg);
+                chatter_pub.publish(msg);
+                old_cv_ptr = cv_ptr;
+                distances.clear();
+            }
+            // lidar_datas.clear();
+        }
         ros::spinOnce();
-        distances.clear();
-        
         loop_rate.sleep();
     }
 
-    // cv::Mat view, rview, map1, map2;
-    // cv::Size imageSize = src_img.size();
-    // cv::initUndistortRectifyMap(cameraMatrix, distCoeffs, cv::Mat(),cv::getOptimalNewCameraMatrix(cameraMatrix, distCoeffs, imageSize, 1, imageSize, 0), imageSize, CV_16SC2, map1, map2);
-    // cv::remap(src_img, src_img, map1, map2, cv::INTER_LINEAR);  // correct the distortion
-    cv::namedWindow("source", cv::WINDOW_KEEPRATIO);
-    // cv::rectangle(src_img, rect, cv::Scalar(0, 0, 255)); // add the rectangle to the image
-    
-    ROS_INFO("Show and save the picture, tap any key to close the photo");
-    cv::imshow("source", src_img);
-    cv::waitKey(0);
     cv::imwrite(output_path, src_img);
     return 0;
 }
