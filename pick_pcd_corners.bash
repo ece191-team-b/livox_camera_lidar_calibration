@@ -1,8 +1,9 @@
 #!/bin/bash
 
-cd ../../../data/pcdFiles/
+cd ../../data/pcdFiles
+ls 
 
-result_path="../corner_lidar.txt"
+result_path="./corner_lidar.txt"
 
 read -r -p "Would you like to delete previously saved lidar corners? [y/n] " response
 case "$response" in
